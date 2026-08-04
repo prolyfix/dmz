@@ -9,7 +9,17 @@
         "php": ">=8.4",
         "ext-ctype": "*",
         "ext-iconv": "*",
-        "symfony/flex": "^2"
+        "doctrine/doctrine-bundle": "^3.3",
+        "doctrine/doctrine-migrations-bundle": "^4.0",
+        "doctrine/orm": "^3.6",
+        "symfony/console": "^8.1",
+        "symfony/dotenv": "^8.1",
+        "symfony/flex": "^2",
+        "symfony/framework-bundle": "^8.1",
+        "symfony/runtime": "^8.1",
+        "symfony/security-bundle": "^8.1",
+        "symfony/validator": "^8.1",
+        "symfony/yaml": "^8.1"
     },
     "flex-require": {
         "symfony/console": "*",
@@ -17,8 +27,6 @@
         "symfony/framework-bundle": "*",
         "symfony/runtime": "*",
         "symfony/yaml": "*"
-    },
-    "require-dev": {
     },
     "config": {
         "allow-plugins": {
@@ -51,16 +59,7 @@
         "symfony/polyfill-php83": "*",
         "symfony/polyfill-php84": "*"
     },
-    "scripts": {
-        "auto-scripts": [
-        ],
-        "post-install-cmd": [
-            "@auto-scripts"
-        ],
-        "post-update-cmd": [
-            "@auto-scripts"
-        ]
-    },
+    "scripts": {},
     "conflict": {
         "symfony/symfony": "*"
     },
