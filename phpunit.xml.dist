@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="https://schema.phpunit.de/10.5/phpunit.xsd"
+         bootstrap="tests/bootstrap.php"
+         cacheDirectory="var/.phpunit.cache"
+         colors="true"
+>
+    <php>
+        <ini name="display_errors" value="1"/>
+        <server name="APP_ENV" value="test" force="true"/>
+        <server name="APP_DEBUG" value="false" force="true"/>
+        <server name="KERNEL_CLASS" value="App\\Kernel"/>
+        <server name="DATABASE_URL" value="sqlite:///%kernel.project_dir%/var/test.db" force="true"/>
+    </php>
+
+    <testsuites>
+        <testsuite name="Project Test Suite">
+            <directory>tests</directory>
+        </testsuite>
+    </testsuites>
+</phpunit>

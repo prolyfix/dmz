@@ -1,0 +1,1 @@
+{"version":2,"defects":[],"times":{"App\\Tests\\Entity\\SynstituteInstanceTest::testLifecycleAndSecurityMethods":0.001,"App\\Tests\\Service\\SlotSyncServiceTest::testSyncCreatesNewAppointmentTypeAndSlot":0.043,"App\\Tests\\Service\\SlotSyncServiceTest::testSyncUpdatesExistingSlotAndAppointmentType":0.001}}
