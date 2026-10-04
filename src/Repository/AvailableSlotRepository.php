@@ -33,6 +33,20 @@ class AvailableSlotRepository extends ServiceEntityRepository
             ->getResult();
     }
 
+    /** @return AvailableSlot[] */
+    public function findBookedForInstance(SynstituteInstance $instance, int $limit = 500): array
+    {
+        return $this->createQueryBuilder('s')
+            ->andWhere('s.synstituteInstance = :instance')
+            ->andWhere('s.bookedAt IS NOT NULL')
+            ->setParameter('instance', $instance)
+            ->orderBy('s.slotDate', 'ASC')
+            ->addOrderBy('s.startAt', 'ASC')
+            ->setMaxResults($limit)
+            ->getQuery()
+            ->getResult();
+    }
+
     public function findOneByInstanceAndSlotUid(SynstituteInstance $instance, string $slotUid): ?AvailableSlot
     {
         return $this->findOneBy([

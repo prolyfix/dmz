@@ -14,6 +14,10 @@ Secure DMZ API using Symfony attribute routing + Doctrine with 3 core tables:
   - `POST /api/bookings`
 - Synstitute pulls booked appointments every 5 minutes:
   - `GET /api/synstitute/bookings`
+- Operators can view booked appointments in the browser (HTTP Basic: instance identifier / API key):
+  - `GET /view/bookings/{id}`
+
+See [docs/slot-sync.md](docs/slot-sync.md) for the full sync and booking process.
 
 ## Security model
 
