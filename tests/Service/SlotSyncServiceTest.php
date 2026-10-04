@@ -177,4 +177,55 @@ final class SlotSyncServiceTest extends TestCase
         self::assertSame('Updated summary', $existingType->getDescription());
         self::assertSame('2026-08-04', $existingSlot->getSlotDate()->format('Y-m-d'));
     }
+
+    public function testSyncReusesNewTypeAndDeduplicatesSlotUidsWithinOneRun(): void
+    {
+        $instance = new SynstituteInstance();
+        $instance->setIdentifier('instance-c')->setApiKeyHash('hash')->setBookingTargetUrl('https://booking.example.test');
+
+        $appointmentTypeRepository = $this->createMock(AppointmentTypeRepository::class);
+        $availableSlotRepository = $this->createMock(AvailableSlotRepository::class);
+        $entityManager = $this->createMock(EntityManagerInterface::class);
+
+        $appointmentTypeRepository->expects($this->once())->method('findOneBy')->willReturn(null);
+        $availableSlotRepository->expects($this->exactly(2))->method('findOneByInstanceAndSlotUid')->willReturn(null);
+
+        $persisted = [];
+        $entityManager->method('persist')->willReturnCallback(static function (object $entity) use (&$persisted): void {
+            $persisted[] = $entity;
+        });
+
+        $query = $this->createMock(\Doctrine\ORM\Query::class);
+        $query->method('setParameter')->willReturnCallback(function (string $name, mixed $value) use ($query) {
+            if ('uids' === $name) {
+                self::assertSame(['slot-1', 'slot-2'], $value);
+            }
+
+            return $query;
+        });
+        $entityManager->method('createQuery')->willReturn($query);
+
+        $slot = static fn (string $uid, string $start, string $end): array => [
+            'uniqid' => $uid,
+            'date' => '2026-08-03',
+            'startAt' => $start,
+            'endAt' => $end,
+            'appointmentType' => ['string' => 'Initial consultation', 'duration' => 30],
+        ];
+
+        $service = new SlotSyncService($entityManager, $appointmentTypeRepository, $availableSlotRepository);
+        $result = $service->sync($instance, [
+            $slot('slot-1', '09:00', '09:30'),
+            $slot('slot-2', '10:00', '10:30'),
+            $slot('slot-1', '11:00', '11:30'),
+        ]);
+
+        self::assertSame(['received' => 3, 'inserted' => 2, 'updated' => 1], $result);
+
+        $types = array_filter($persisted, static fn (object $e): bool => $e instanceof AppointmentType);
+        $slots = array_values(array_filter($persisted, static fn (object $e): bool => $e instanceof AvailableSlot));
+        self::assertCount(1, $types);
+        self::assertCount(2, $slots);
+        self::assertSame('11:00', $slots[0]->getStartAt()->format('H:i'));
+    }
 }

@@ -28,6 +28,11 @@ class SlotSyncService
         $seenUids = [];
         $inserted = 0;
         $updated = 0;
+        // Repository lookups don't see entities persisted but not yet flushed in this run.
+        /** @var array<string, AppointmentType> $typesByKey */
+        $typesByKey = [];
+        /** @var array<string, AvailableSlot> $slotsByUid */
+        $slotsByUid = [];
 
         foreach ($rawSlots as $rawSlot) {
             if (!is_array($rawSlot)) {
@@ -40,9 +45,9 @@ class SlotSyncService
             }
 
             [$slotUid, $date, $startAt, $endAt, $typeName, $typeDuration, $typeDescription] = $normalized;
-            $seenUids[] = $slotUid;
 
-            $appointmentType = $this->appointmentTypeRepository->findOneBy([
+            $typeKey = $typeName . '|' . $typeDuration;
+            $appointmentType = $typesByKey[$typeKey] ??= $this->appointmentTypeRepository->findOneBy([
                 'synstituteInstance' => $instance,
                 'name' => $typeName,
                 'durationMinutes' => $typeDuration,
@@ -55,19 +60,27 @@ class SlotSyncService
                     ->setDurationMinutes($typeDuration)
                     ->setDescription($typeDescription);
                 $this->entityManager->persist($appointmentType);
+                $typesByKey[$typeKey] = $appointmentType;
             } elseif ($appointmentType->getDescription() !== $typeDescription) {
                 $appointmentType->setDescription($typeDescription);
             }
 
-            $slot = $this->availableSlotRepository->findOneByInstanceAndSlotUid($instance, $slotUid);
-            if (null === $slot) {
-                $slot = (new AvailableSlot())
-                    ->setSynstituteInstance($instance)
-                    ->setSlotUid($slotUid);
-                $inserted++;
-                $this->entityManager->persist($slot);
-            } else {
+            if (isset($slotsByUid[$slotUid])) {
+                $slot = $slotsByUid[$slotUid];
                 $updated++;
+            } else {
+                $seenUids[] = $slotUid;
+                $slot = $this->availableSlotRepository->findOneByInstanceAndSlotUid($instance, $slotUid);
+                if (null === $slot) {
+                    $slot = (new AvailableSlot())
+                        ->setSynstituteInstance($instance)
+                        ->setSlotUid($slotUid);
+                    $inserted++;
+                    $this->entityManager->persist($slot);
+                } else {
+                    $updated++;
+                }
+                $slotsByUid[$slotUid] = $slot;
             }
 
             $slot
