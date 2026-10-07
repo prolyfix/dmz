@@ -63,9 +63,17 @@ php bin/console app:instance:create <identifier> <https_booking_target_url>
 
 The numeric database `id` of the instance is needed for the web view (`/view/bookings/{id}`).
 
-## 2. Authentication (all `/api/*` calls)
+Instances can also be created and managed from `/admin`, using a separate administrator
+account. See [administrator setup](../README.md#instance-administration).
+This interface does not expose bookings or customer data. It permits status changes,
+booking target changes, and API key rotation; the instance identifier cannot be changed.
+Both the admin and CLI require a public HTTPS booking target on port 443, without URL
+credentials or a fragment. The target is checked again before forwarding, and redirects
+are not followed.
 
-Every API request needs these headers:
+## 2. Authentication (Synstitute `/api/*` calls)
+
+Every authenticated Synstitute API request needs these headers:
 
 | Header | Rule |
 |---|---|
@@ -76,6 +84,8 @@ Every API request needs these headers:
 | `Content-Type` | `application/json` for POST requests |
 
 HTTPS is mandatory unless `APP_ENV=dev` **and** `APP_ALLOW_INSECURE=1`.
+
+The website-facing routes under `/api/public/` are public and do not accept or require the Synstitute API key. They still require HTTPS outside development.
 
 ## 3. End-to-end flow
 
@@ -162,7 +172,50 @@ The booking client sends any JSON object. It should contain `uniqid` or `slotUid
 4. On 2xx, if the slot uid exists for this instance, the slot gets `bookedAt = now` and `bookedPayload = payload`, and `exportedAt` is reset to `null`.
 5. If the uid is missing or unknown, the booking is still forwarded but **not recorded** in the DMZ.
 
-### 3.3 Booking pull: `GET /api/synstitute/bookings`
+### 3.3 Website routes
+
+The customer website can call these routes without Synstitute credentials. Replace `{instance_identifier}` with the identifier used when onboarding the Synstitute.
+
+#### Read available slots: `GET /api/public/synstitutes/{instance_identifier}/slots`
+
+Returns future, unbooked slots for that active Synstitute. The response omits internal booking data:
+
+```json
+{
+  "slots": [
+    {
+      "uniqid": "slot-abc-123",
+      "date": "2026-08-03",
+      "startAt": "09:00",
+      "endAt": "09:30",
+      "appointmentType": {
+        "string": "Initial consultation",
+        "duration": 30,
+        "description": "First patient visit"
+      }
+    }
+  ],
+  "count": 1
+}
+```
+
+#### Make a reservation: `POST /api/public/synstitutes/{instance_identifier}/bookings`
+
+Send the booking payload expected by the Synstitute booking target, including the selected slot's `uniqid` (or `slotUid`), as JSON. The DMZ rejects unknown, past, or already-booked slots with `409`, forwards valid payloads, and records the booking only after the target accepts it.
+
+```json
+{
+  "uniqid": "slot-abc-123",
+  "customer": {
+    "name": "Jane Doe",
+    "email": "jane@example.com"
+  }
+}
+```
+
+The Synstitute API key must remain on the server-side integration and must not be embedded in the customer website. For a browser-based website hosted on another origin, configure CORS at the web server or reverse proxy to allow only that website's origin.
+
+### 3.4 Booking pull: `GET /api/synstitute/bookings`
 
 - Returns up to **500** booked slots with `exportedAt IS NULL`, oldest booking first.
 - Each returned slot is immediately marked `exportedAt = now`.
@@ -185,7 +238,7 @@ The booking client sends any JSON object. It should contain `uniqid` or `slotUid
 }
 ```
 
-### 3.4 Web view: `GET /view/bookings/{id}`
+### 3.5 Web view: `GET /view/bookings/{id}`
 
 - `{id}` is the numeric instance id.
 - Login uses the browser prompt (HTTP Basic): username = instance identifier, password = API key.
@@ -203,8 +256,8 @@ The booking client sends any JSON object. It should contain `uniqid` or `slotUid
 ## 5. Known limitations
 
 - **At-most-once export**: a slot is marked exported before the instance confirms receipt. If the pull response is lost, that booking is not returned again. The web view still shows it.
-- **No double-booking guard**: `/api/bookings` does not check whether the slot is already booked. A second booking overwrites `bookedPayload` and re-queues the slot for export.
-- **Booking clients need instance credentials**: `/api/bookings` uses the same instance API key as the Synstitute endpoints.
+- **Concurrent booking race**: the website endpoint checks whether a slot is already booked, but simultaneous requests for the same slot are not serialized.
+- **Booking clients need instance credentials**: the authenticated `/api/bookings` endpoint uses the same instance API key as the Synstitute endpoints.
 - **No timezone handling**: `date`, `startAt` and `endAt` are stored as-is. Both sides must agree on the timezone.
 - **Booked slots are never cleaned up** automatically.
 - The `requireHttps` column on the instance is not evaluated. HTTPS is enforced globally instead.

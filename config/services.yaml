@@ -1,4 +1,6 @@
 parameters:
+    admin_username_default: 'admin'
+    admin_password_hash_default: ''
 
 services:
     _defaults:

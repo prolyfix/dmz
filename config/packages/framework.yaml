@@ -2,8 +2,11 @@ framework:
     secret: '%env(APP_SECRET)%'
     http_method_override: false
     handle_all_throwables: true
-    csrf_protection: false
-    session: false
+    csrf_protection: true
+    session:
+        cookie_secure: auto
+        cookie_httponly: true
+        cookie_samesite: strict
     trusted_proxies: '%env(TRUSTED_PROXIES)%'
     trusted_headers: [ 'x-forwarded-for', 'x-forwarded-host', 'x-forwarded-proto', 'x-forwarded-port', 'x-forwarded-prefix' ]
 

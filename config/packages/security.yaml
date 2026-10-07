@@ -1,9 +1,17 @@
 security:
     password_hashers:
+        Symfony\Component\Security\Core\User\InMemoryUser:
+            algorithm: auto
         App\Entity\SynstituteInstance:
             algorithm: auto
 
     providers:
+        admin_provider:
+            memory:
+                users:
+                    '%env(default:admin_username_default:ADMIN_USERNAME)%':
+                        password: '%env(default:admin_password_hash_default:ADMIN_PASSWORD_HASH)%'
+                        roles: [ROLE_ADMIN]
         app_instance_provider:
             entity:
                 class: App\Entity\SynstituteInstance
@@ -13,6 +21,23 @@ security:
         dev:
             pattern: ^/(?:_(profiler|wdt)|css|images|js)/
             security: false
+
+        admin:
+            pattern: ^/admin(?:/|$)
+            provider: admin_provider
+            form_login:
+                login_path: dmz_admin_login
+                check_path: dmz_admin_login
+                enable_csrf: true
+                default_target_path: dmz_admin_instances
+                always_use_default_target_path: true
+            login_throttling:
+                max_attempts: 5
+                interval: '15 minutes'
+            logout:
+                path: dmz_admin_logout
+                target: dmz_admin_login
+                enable_csrf: true
 
         web:
             pattern: ^/view/
@@ -28,6 +53,9 @@ security:
                 - App\Security\ApiKeyAuthenticator
 
     access_control:
+        - { path: ^/admin/login$, roles: PUBLIC_ACCESS, requires_channel: https }
+        - { path: ^/admin(?:/|$), roles: ROLE_ADMIN, requires_channel: https }
         - { path: ^/health$, roles: PUBLIC_ACCESS }
+        - { path: ^/api/public/, roles: PUBLIC_ACCESS }
         - { path: ^/api, roles: ROLE_INSTANCE }
         - { path: ^/view/, roles: ROLE_INSTANCE }

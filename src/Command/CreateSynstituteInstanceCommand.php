@@ -6,6 +6,7 @@ namespace App\Command;
 
 use App\Entity\SynstituteInstance;
 use App\Repository\SynstituteInstanceRepository;
+use App\Service\BookingTargetUrlValidator;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
@@ -20,6 +21,7 @@ class CreateSynstituteInstanceCommand extends Command
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly SynstituteInstanceRepository $instanceRepository,
+        private readonly BookingTargetUrlValidator $targetUrlValidator,
     ) {
         parent::__construct();
     }
@@ -38,15 +40,20 @@ class CreateSynstituteInstanceCommand extends Command
         $identifier = (string) $input->getArgument('identifier');
         $targetUrl = (string) $input->getArgument('bookingTargetUrl');
 
+        if (!preg_match('/^[A-Za-z0-9._-]{3,64}$/D', $identifier)) {
+            $io->error('Use an identifier of 3 to 64 letters, digits, dots, underscores or hyphens.');
+
+            return Command::FAILURE;
+        }
+
         if ($this->instanceRepository->findOneBy(['identifier' => $identifier])) {
             $io->error('Instance identifier already exists.');
 
             return Command::FAILURE;
         }
 
-        $parts = parse_url($targetUrl);
-        if (false === $parts || !isset($parts['scheme']) || 'https' !== strtolower((string) $parts['scheme'])) {
-            $io->error('bookingTargetUrl must be a valid HTTPS URL.');
+        if (!$this->targetUrlValidator->isAllowed($targetUrl)) {
+            $io->error('bookingTargetUrl must be a public HTTPS URL on port 443, without credentials or a fragment.');
 
             return Command::FAILURE;
         }

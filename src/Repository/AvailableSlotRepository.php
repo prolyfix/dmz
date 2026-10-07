@@ -7,6 +7,7 @@ namespace App\Repository;
 use App\Entity\AvailableSlot;
 use App\Entity\SynstituteInstance;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
+use Doctrine\DBAL\Types\Types;
 use Doctrine\Persistence\ManagerRegistry;
 
 /**
@@ -53,5 +54,23 @@ class AvailableSlotRepository extends ServiceEntityRepository
             'synstituteInstance' => $instance,
             'slotUid' => $slotUid,
         ]);
+    }
+
+    /** @return AvailableSlot[] */
+    public function findAvailableForInstance(SynstituteInstance $instance): array
+    {
+        $now = new \DateTimeImmutable('now');
+
+        return $this->createQueryBuilder('s')
+            ->andWhere('s.synstituteInstance = :instance')
+            ->andWhere('s.bookedAt IS NULL')
+            ->andWhere('(s.slotDate > :today OR (s.slotDate = :today AND s.startAt >= :currentTime))')
+            ->setParameter('instance', $instance)
+            ->setParameter('today', $now, Types::DATE_IMMUTABLE)
+            ->setParameter('currentTime', $now, Types::TIME_IMMUTABLE)
+            ->orderBy('s.slotDate', 'ASC')
+            ->addOrderBy('s.startAt', 'ASC')
+            ->getQuery()
+            ->getResult();
     }
 }

@@ -31,9 +31,13 @@ class SecurityHeadersSubscriber implements EventSubscriberInterface
             $response->headers->set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
         }
 
-        if (str_starts_with($request->getPathInfo(), '/api/')) {
+        if (str_starts_with($request->getPathInfo(), '/api/') || preg_match('#^/admin(?:/|$)#', $request->getPathInfo())) {
             $response->headers->set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
             $response->headers->set('Pragma', 'no-cache');
+        }
+
+        if (preg_match('#^/admin(?:/|$)#', $request->getPathInfo())) {
+            $response->headers->set('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
         }
     }
 }

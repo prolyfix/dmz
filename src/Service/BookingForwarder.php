@@ -8,10 +8,15 @@ use App\Entity\SynstituteInstance;
 
 class BookingForwarder
 {
+    public function __construct(
+        private readonly BookingTargetUrlValidator $targetUrlValidator,
+    ) {
+    }
+
     public function forward(SynstituteInstance $instance, array $payload): array
     {
         $url = $instance->getBookingTargetUrl();
-        if (!$this->isAllowedTargetUrl($url)) {
+        if (!$this->targetUrlValidator->isAllowed($url)) {
             return [
                 'success' => false,
                 'status' => 0,
@@ -31,6 +36,7 @@ class BookingForwarder
                 'content' => json_encode($payload, JSON_UNESCAPED_SLASHES),
                 'ignore_errors' => true,
                 'timeout' => 10,
+                'follow_location' => 0,
             ],
         ]);
 
@@ -42,36 +48,6 @@ class BookingForwarder
             'status' => $status,
             'body' => false === $responseBody ? '' : $responseBody,
         ];
-    }
-
-    private function isAllowedTargetUrl(string $url): bool
-    {
-        $parts = parse_url($url);
-        if (false === $parts || !isset($parts['scheme'], $parts['host'])) {
-            return false;
-        }
-
-        if ('https' !== strtolower((string) $parts['scheme'])) {
-            return false;
-        }
-
-        $records = dns_get_record((string) $parts['host'], DNS_A + DNS_AAAA);
-        if ([] === $records || false === $records) {
-            return false;
-        }
-
-        foreach ($records as $record) {
-            $ip = $record['ip'] ?? $record['ipv6'] ?? null;
-            if (null === $ip) {
-                continue;
-            }
-
-            if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
-                return false;
-            }
-        }
-
-        return true;
     }
 
     private function extractStatusCode(array $headers): int
