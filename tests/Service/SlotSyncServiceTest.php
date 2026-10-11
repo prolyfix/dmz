@@ -30,6 +30,7 @@ final class SlotSyncServiceTest extends TestCase
                 'synstituteInstance' => $instance,
                 'name' => 'Initial consultation',
                 'durationMinutes' => 30,
+                'sourceId' => null,
             ])
             ->willReturn(null);
 
@@ -119,6 +120,7 @@ final class SlotSyncServiceTest extends TestCase
                 'synstituteInstance' => $instance,
                 'name' => 'Follow-up consultation',
                 'durationMinutes' => 60,
+                'sourceId' => null,
             ])
             ->willReturn($existingType);
 

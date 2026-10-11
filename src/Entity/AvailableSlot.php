@@ -138,6 +138,17 @@ class AvailableSlot
         return $this;
     }
 
+    /** @return array<string, mixed> */
+    public function getBookedAppointmentTypeData(): array
+    {
+        $snapshot = $this->bookedPayload['appointmentType'] ?? null;
+        if (is_array($snapshot) && is_string($snapshot['string'] ?? null) && is_int($snapshot['duration'] ?? null) && $snapshot['duration'] > 0) {
+            return $snapshot;
+        }
+
+        return $this->appointmentType->toArray();
+    }
+
     public function getBookedAt(): ?\DateTimeImmutable
     {
         return $this->bookedAt;

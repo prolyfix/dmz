@@ -8,12 +8,19 @@ Secure DMZ API using Symfony attribute routing + Doctrine with 3 core tables:
 
 ## What it does
 
+- Synstitute synchronizes appointment categories (source ID, name, duration, description,
+  booking instructions), independently or together with slots:
+  - `POST /api/synstitute/appointment-categories/sync`
+- The customer website reads the appointment type catalogue:
+  - `GET /api/public/synstitutes/{instance_identifier}/appointment-types`
 - Synstitute sends available slots every 5 minutes:
   - `POST /api/synstitute/slots/sync`
 - The customer website reads future available slots:
   - `GET /api/public/synstitutes/{instance_identifier}/slots`
 - Customer website reservations are forwarded to the Synstitute:
   - `POST /api/public/synstitutes/{instance_identifier}/bookings`
+- If forwarding fails, reservations for available slots are saved locally with status
+  `queued` for Synstitute to fetch through the existing bookings API.
 - Authenticated booking payloads can also be forwarded to Synstitute:
   - `POST /api/bookings`
 - Synstitute pulls booked appointments every 5 minutes:
@@ -72,6 +79,10 @@ Behind a reverse proxy, ensure `TRUSTED_PROXIES` only includes your trusted prox
 - API keys are displayed only in the response to successful creation or rotation. Save
   the key before leaving that page; rotation immediately invalidates the old key.
 - Mutations are logged through the application logger without passwords, API keys or customer data.
+- Every `/api/*` request is logged with its method, route, response status and duration.
+  Failed requests use warning/error levels. These request log entries omit request bodies,
+  headers, query strings and exception messages.
+- In the development environment, application logs are written to `var/log/dev.log`.
 - The admin session does not grant access to `/api/synstitute/bookings` or `/view/bookings/{id}`.
   As an infrastructure operator you still control the server/database; this is application-level isolation.
 - Booking targets must resolve to public addresses and use HTTPS on port 443, without
@@ -115,6 +126,10 @@ Default is sqlite for minimal operational footprint:
 - DSN in `.env`:
   - `DATABASE_URL="sqlite:///%kernel.project_dir%/var/data.db"`
 
+When using MariaDB, the `serverVersion` in `DATABASE_URL` must identify MariaDB and match
+the actual server (for example `serverVersion=10.6.23-MariaDB`), not MySQL 8.
+A mismatched platform can make Doctrine repeatedly reject its migration metadata storage.
+
 ## Request examples
 
 Example headers:
@@ -148,3 +163,7 @@ Sync slots payload:
 ```
 
 Booking payload should include `uniqid` or `slotUid` so the slot can be marked as booked.
+For source-ID categories, it may also include `appointmentType: 41` or
+`appointmentType: {"id": 41}` (the source category ID of the selected slot).
+The DMZ forwards and stores the full category snapshot; category updates do not alter
+already-booked appointments. Existing slot payloads without category IDs remain supported.

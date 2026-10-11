@@ -37,14 +37,13 @@ class BookingViewController extends AbstractController
 
         $rows = '';
         foreach ($this->availableSlotRepository->findBookedForInstance($instance) as $slot) {
-            $type = $slot->getAppointmentType();
             $payload = $slot->getBookedPayload();
             $rows .= sprintf(
                 '<tr><td>%s</td><td>%s – %s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td><pre>%s</pre></td></tr>',
                 $this->e($slot->getSlotDate()->format('Y-m-d')),
                 $this->e($slot->getStartAt()->format('H:i')),
                 $this->e($slot->getEndAt()->format('H:i')),
-                $this->e($type->getName()),
+                $this->e($slot->getBookedAppointmentTypeData()['string']),
                 $this->e($slot->getSlotUid()),
                 $this->e($slot->getBookedAt()?->format('Y-m-d H:i') ?? ''),
                 $this->e($slot->getExportedAt()?->format('Y-m-d H:i') ?? '–'),

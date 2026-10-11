@@ -6,9 +6,12 @@ namespace App\Controller;
 
 use App\Entity\SynstituteInstance;
 use App\Repository\AvailableSlotRepository;
+use App\Repository\AppointmentTypeRepository;
 use App\Repository\SynstituteInstanceRepository;
 use App\Service\BookingForwarder;
+use App\Service\BookingPayloadFactory;
 use Doctrine\ORM\EntityManagerInterface;
+use Psr\Log\LoggerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -25,9 +28,33 @@ class PublicApiController extends AbstractController
         private readonly AvailableSlotRepository $availableSlotRepository,
         private readonly BookingForwarder $bookingForwarder,
         private readonly EntityManagerInterface $entityManager,
+        private readonly LoggerInterface $logger,
         #[Autowire('%kernel.environment%')]
         private readonly string $appEnv,
+        private readonly AppointmentTypeRepository $appointmentTypeRepository,
+        private readonly BookingPayloadFactory $bookingPayloadFactory,
     ) {
+    }
+
+    #[Route('/api/public/synstitutes/{identifier}/appointment-types', name: 'dmz_public_appointment_types', requirements: ['identifier' => '[A-Za-z0-9._-]{3,64}'], methods: ['GET'])]
+    public function appointmentTypes(Request $request, string $identifier): JsonResponse
+    {
+        $httpsError = $this->requireHttps($request);
+        if (null !== $httpsError) {
+            return $httpsError;
+        }
+        $instance = $this->instanceRepository->findActiveByIdentifier($identifier);
+        if (null === $instance) {
+            return $this->json(['error' => 'Synstitute not found'], Response::HTTP_NOT_FOUND);
+        }
+        $types = [];
+        foreach ($this->appointmentTypeRepository->findBy(['synstituteInstance' => $instance], ['name' => 'ASC', 'id' => 'ASC']) as $type) {
+            if (null !== $type->getSourceId()) {
+                $types[] = $type->toArray();
+            }
+        }
+
+        return $this->json(['appointmentTypes' => $types, 'count' => count($types)], Response::HTTP_OK, ['Cache-Control' => 'no-store']);
     }
 
     #[Route('/api/public/synstitutes/{identifier}/slots', name: 'dmz_public_slots', requirements: ['identifier' => '[A-Za-z0-9._-]{3,64}'], methods: ['GET'])]
@@ -51,11 +78,7 @@ class PublicApiController extends AbstractController
                 'date' => $slot->getSlotDate()->format('Y-m-d'),
                 'startAt' => $slot->getStartAt()->format('H:i'),
                 'endAt' => $slot->getEndAt()->format('H:i'),
-                'appointmentType' => [
-                    'string' => $type->getName(),
-                    'duration' => $type->getDurationMinutes(),
-                    'description' => $type->getDescription(),
-                ],
+                'appointmentType' => $type->toArray(),
             ];
         }
 
@@ -102,14 +125,12 @@ class PublicApiController extends AbstractController
             return $this->json(['error' => 'Slot is no longer available'], Response::HTTP_CONFLICT);
         }
 
-        $forward = $this->bookingForwarder->forward($instance, $payload);
-        if (!$forward['success']) {
-            return $this->json([
-                'error' => 'Upstream forwarding failed',
-                'upstreamStatus' => $forward['status'],
-            ], Response::HTTP_BAD_GATEWAY);
+        try {
+            $payload = $this->bookingPayloadFactory->forSlot($slot, $payload);
+        } catch (\InvalidArgumentException $exception) {
+            return $this->json(['error' => $exception->getMessage()], Response::HTTP_BAD_REQUEST);
         }
-
+        $forward = $this->bookingForwarder->forward($instance, $payload);
         $slot
             ->setBookedAt(new \DateTimeImmutable('now'))
             ->setBookedPayload($payload)
@@ -117,8 +138,15 @@ class PublicApiController extends AbstractController
             ->touch();
         $this->entityManager->flush();
 
+        if (!$forward['success']) {
+            $this->logger->warning('Booking forwarding failed; booking queued for Synstitute pickup.', [
+                'identifier' => $instance->getIdentifier(),
+                'upstreamStatus' => $forward['status'],
+            ]);
+        }
+
         return $this->json([
-            'status' => 'forwarded',
+            'status' => $forward['success'] ? 'forwarded' : 'queued',
             'upstreamStatus' => $forward['status'],
         ], Response::HTTP_CREATED);
     }

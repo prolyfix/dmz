@@ -7,8 +7,10 @@ namespace App\Controller;
 use App\Entity\SynstituteInstance;
 use App\Repository\AvailableSlotRepository;
 use App\Service\BookingForwarder;
+use App\Service\BookingPayloadFactory;
 use App\Service\SlotSyncService;
 use Doctrine\ORM\EntityManagerInterface;
+use Psr\Log\LoggerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -24,7 +26,33 @@ class ApiController extends AbstractController
         private readonly AvailableSlotRepository $availableSlotRepository,
         private readonly BookingForwarder $bookingForwarder,
         private readonly EntityManagerInterface $entityManager,
+        private readonly LoggerInterface $logger,
+        private readonly BookingPayloadFactory $bookingPayloadFactory,
     ) {
+    }
+
+    #[Route('/api/synstitute/appointment-categories/sync', name: 'dmz_appointment_categories_sync', methods: ['POST'])]
+    public function syncAppointmentCategories(Request $request): JsonResponse
+    {
+        $instance = $this->requireInstance();
+        if ($instance instanceof JsonResponse) {
+            return $instance;
+        }
+        $payload = $this->readJsonPayload($request);
+        if ($payload instanceof JsonResponse) {
+            return $payload;
+        }
+        $categories = $payload['appointmentCategories'] ?? $payload;
+        if (!is_array($categories) || !array_is_list($categories)) {
+            return $this->json(['error' => 'appointmentCategories must be an array'], Response::HTTP_BAD_REQUEST);
+        }
+        try {
+            $stats = $this->slotSyncService->syncCategories($instance, $categories);
+        } catch (\InvalidArgumentException $exception) {
+            return $this->json(['error' => $exception->getMessage()], Response::HTTP_BAD_REQUEST);
+        }
+
+        return $this->json(['status' => 'ok', 'stats' => $stats]);
     }
 
     #[Route('/health', name: 'dmz_health', methods: ['GET'])]
@@ -54,7 +82,21 @@ class ApiController extends AbstractController
             return $this->json(['error' => 'slots payload must be an array'], Response::HTTP_BAD_REQUEST);
         }
 
+        $categoryStats = null;
+        if (array_key_exists('appointmentCategories', $payload)) {
+            if (!is_array($payload['appointmentCategories']) || !array_is_list($payload['appointmentCategories'])) {
+                return $this->json(['error' => 'appointmentCategories must be an array'], Response::HTTP_BAD_REQUEST);
+            }
+            try {
+                $categoryStats = $this->slotSyncService->syncCategories($instance, $payload['appointmentCategories']);
+            } catch (\InvalidArgumentException $exception) {
+                return $this->json(['error' => $exception->getMessage()], Response::HTTP_BAD_REQUEST);
+            }
+        }
         $stats = $this->slotSyncService->sync($instance, $slots);
+        if (null !== $categoryStats) {
+            $stats['appointmentCategories'] = $categoryStats;
+        }
 
         return $this->json([
             'status' => 'ok',
@@ -75,31 +117,61 @@ class ApiController extends AbstractController
             return $payload;
         }
 
+        $slotUid = (string) ($payload['uniqid'] ?? $payload['slotUid'] ?? '');
+        $slot = '' === $slotUid ? null : $this->availableSlotRepository->findOneByInstanceAndSlotUid($instance, $slotUid);
+        if (null !== $slot) {
+            try {
+                $payload = $this->bookingPayloadFactory->forSlot($slot, $payload);
+            } catch (\InvalidArgumentException $exception) {
+                return $this->json(['error' => $exception->getMessage()], Response::HTTP_BAD_REQUEST);
+            }
+        } elseif (array_key_exists('appointmentType', $payload)) {
+            return $this->json(['error' => 'A known slot is required to validate appointmentType'], Response::HTTP_BAD_REQUEST);
+        }
         $forward = $this->bookingForwarder->forward($instance, $payload);
         if (!$forward['success']) {
-            return $this->json([
-                'error' => 'Upstream forwarding failed',
-                'upstreamStatus' => $forward['status'],
-            ], Response::HTTP_BAD_GATEWAY);
-        }
+            $now = new \DateTimeImmutable('now');
+            if (
+                null === $slot
+                || null !== $slot->getBookedAt()
+                || $slot->getSlotDate()->format('Y-m-d') < $now->format('Y-m-d')
+                || (
+                    $slot->getSlotDate()->format('Y-m-d') === $now->format('Y-m-d')
+                    && $slot->getStartAt()->format('H:i:s') < $now->format('H:i:s')
+                )
+            ) {
+                $this->logger->error('Booking forwarding failed; no available slot to queue.', [
+                    'identifier' => $instance->getIdentifier(),
+                    'upstreamStatus' => $forward['status'],
+                ]);
 
-        $slotUid = (string) ($payload['uniqid'] ?? $payload['slotUid'] ?? '');
-        if ('' !== $slotUid) {
-            $slot = $this->availableSlotRepository->findOneByInstanceAndSlotUid($instance, $slotUid);
-            if (null !== $slot) {
-                $slot
-                    ->setBookedAt(new \DateTimeImmutable('now'))
-                    ->setBookedPayload($payload)
-                    ->setExportedAt(null)
-                    ->touch();
-                $this->entityManager->flush();
+                return $this->json([
+                    'error' => 'Upstream forwarding failed',
+                    'upstreamStatus' => $forward['status'],
+                ], Response::HTTP_BAD_GATEWAY);
             }
         }
 
+        if (null !== $slot) {
+            $slot
+                ->setBookedAt(new \DateTimeImmutable('now'))
+                ->setBookedPayload($payload)
+                ->setExportedAt(null)
+                ->touch();
+            $this->entityManager->flush();
+        }
+
+        if (!$forward['success']) {
+            $this->logger->warning('Booking forwarding failed; booking queued for Synstitute pickup.', [
+                'identifier' => $instance->getIdentifier(),
+                'upstreamStatus' => $forward['status'],
+            ]);
+        }
+
         return $this->json([
-            'status' => 'forwarded',
+            'status' => $forward['success'] ? 'forwarded' : 'queued',
             'upstreamStatus' => $forward['status'],
-        ]);
+        ], $forward['success'] ? Response::HTTP_OK : Response::HTTP_ACCEPTED);
     }
 
     #[Route('/api/synstitute/bookings', name: 'dmz_bookings_pull', methods: ['GET'])]
@@ -121,11 +193,7 @@ class ApiController extends AbstractController
                 'date' => $slot->getSlotDate()->format('Y-m-d'),
                 'startAt' => $slot->getStartAt()->format('H:i'),
                 'endAt' => $slot->getEndAt()->format('H:i'),
-                'appointmentType' => [
-                    'string' => $slot->getAppointmentType()->getName(),
-                    'duration' => $slot->getAppointmentType()->getDurationMinutes(),
-                    'description' => $slot->getAppointmentType()->getDescription(),
-                ],
+                'appointmentType' => $slot->getBookedAppointmentTypeData(),
                 'bookedAt' => $slot->getBookedAt()?->format(DATE_ATOM),
                 'payload' => $slot->getBookedPayload(),
             ];
